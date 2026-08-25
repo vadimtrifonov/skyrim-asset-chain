@@ -68,6 +68,31 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
         Assert.True(row.GetProperty("winner").GetBoolean());
     }
 
+    [Theory]
+    [InlineData("High", "Omega.bsa")]
+    [InlineData("Low", "Shadow.bsa")]
+    public void RejectsSkyrimLeArchiveAnywhereInActiveArchiveChain(string mod, string archive)
+    {
+        var root = fixture.CreateCopy();
+        try
+        {
+            var oldrimArchive = Path.Combine(AppContext.BaseDirectory, "Fixtures", "archive-skyrim-le.bsa");
+            var activeArchive = Path.Combine(root, "managed-mods", mod, archive);
+            File.Copy(oldrimArchive, activeArchive, overwrite: true);
+
+            var result = _driver.Run("scripts/shared.pex", root: root);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Equal(string.Empty, result.Stdout);
+            Assert.Contains("Unsupported BSA version 0x68", result.Stderr, StringComparison.Ordinal);
+            Assert.Contains("expected 0x69", result.Stderr, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void LoadsSamePluginTexturesArchiveAfterPlainArchive()
     {

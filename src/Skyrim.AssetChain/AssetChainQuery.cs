@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using Mutagen.Bethesda;
 using Mutagen.Bethesda.Archives;
 
@@ -125,6 +126,7 @@ internal static class AssetChainQuery
                 var matches = new Dictionary<string, string>(StringComparer.Ordinal);
                 try
                 {
+                    ValidateBsaVersion(profile.Game, copy.Path);
                     var reader = Archive.CreateReader(gameRelease, copy.Path);
                     foreach (var file in reader.Files)
                     {
@@ -148,7 +150,8 @@ internal static class AssetChainQuery
                     !exception.Message.StartsWith("Archive contains duplicate", StringComparison.Ordinal))
                 {
                     throw new InvalidOperationException(
-                        $"Cannot read active archive copy '{archive.Name}' from '{copy.Layer.Origin}': {copy.Path}",
+                        $"Cannot read active archive copy '{archive.Name}' from '{copy.Layer.Origin}': " +
+                        $"{copy.Path}. {exception.Message}",
                         exception);
                 }
 
@@ -157,6 +160,26 @@ internal static class AssetChainQuery
         }
 
         return result;
+    }
+
+    private static void ValidateBsaVersion(GameKind game, string archivePath)
+    {
+        const uint supportedVersion = 0x69;
+        Span<byte> header = stackalloc byte[8];
+        using var stream = File.OpenRead(archivePath);
+        stream.ReadExactly(header);
+
+        if (!header[..4].SequenceEqual("BSA\0"u8))
+        {
+            throw new InvalidDataException($"Invalid BSA signature: {archivePath}");
+        }
+
+        var version = BinaryPrimitives.ReadUInt32LittleEndian(header[4..]);
+        if (version != supportedVersion)
+        {
+            throw new InvalidDataException(
+                $"Unsupported BSA version 0x{version:X2} for {game}; expected 0x{supportedVersion:X2}: {archivePath}");
+        }
     }
 
     private static void ValidateMemberReadable(IArchiveFile file, string archivePath)
