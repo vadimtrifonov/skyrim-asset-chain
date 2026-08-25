@@ -130,6 +130,46 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
     }
 
     [Fact]
+    public void LooseProvidersOverrideArchiveChain()
+    {
+        var root = fixture.CreateCopy();
+        try
+        {
+            foreach (var sourceRoot in new[]
+                     {
+                         Path.Combine(root, "Game Root", "Data"),
+                         Path.Combine(root, "managed-mods", "Low"),
+                         Path.Combine(root, "managed-mods", "High"),
+                         Path.Combine(root, "output")
+                     })
+            {
+                var path = Path.Combine(sourceRoot, "Scripts", "Shared.pex");
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, "loose provider");
+            }
+
+            var rows = ParseRows(_driver.Run("scripts/shared.pex", root: root));
+            var firstLoose = rows.FindIndex(row => row.GetProperty("sourceKind").GetString() == "loose");
+
+            Assert.True(firstLoose > 1);
+            Assert.All(rows.Take(firstLoose),
+                row => Assert.Equal("archive", row.GetProperty("sourceKind").GetString()));
+            Assert.All(rows.Skip(firstLoose),
+                row => Assert.Equal("loose", row.GetProperty("sourceKind").GetString()));
+            Assert.Equal(new[] { "Game Data", "Low", "High", "Overwrite" },
+                rows.Skip(firstLoose).Select(row => row.GetProperty("sourceOrigin").GetString()));
+
+            var winner = Assert.Single(rows, row => row.GetProperty("winner").GetBoolean());
+            Assert.Equal("Overwrite", winner.GetProperty("sourceOrigin").GetString());
+            Assert.Equal("loose", winner.GetProperty("sourceKind").GetString());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void MohiddenFileIsSkippedWithoutHidingItsUnsuffixedSibling()
     {
         var rows = ParseRows(_driver.Run("scripts/hidden.pex"));
