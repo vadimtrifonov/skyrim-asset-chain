@@ -648,11 +648,16 @@ internal sealed class Mo2Profile
             throw new InvalidOperationException($"{iniPath} has no [General] gameName value.");
         }
 
-        var configuredForVr = configuredName.Contains("VR", StringComparison.OrdinalIgnoreCase);
-        if ((game == GameKind.SkyrimVR) != configuredForVr)
+        var expectedName = game switch
+        {
+            GameKind.SkyrimSE => "Skyrim Special Edition",
+            GameKind.SkyrimVR => "Skyrim VR",
+            _ => throw new ArgumentOutOfRangeException(nameof(game), game, null)
+        };
+        if (!configuredName.Equals(expectedName, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"Requested game {game} does not match {iniPath} gameName '{configuredName}'.");
+                $"Requested game {game} requires {iniPath} gameName '{expectedName}', but found '{configuredName}'.");
         }
     }
 

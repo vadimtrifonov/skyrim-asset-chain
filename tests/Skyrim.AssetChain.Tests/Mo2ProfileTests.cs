@@ -8,14 +8,25 @@ public sealed class Mo2ProfileTests(AssetChainFixture fixture) : IClassFixture<A
     private readonly AssetChainTestDriver _driver = new(fixture);
     private readonly List<string> _copies = [];
 
-    [Fact]
-    public void RejectsGameThatDoesNotMatchMo2Instance()
+    [Theory]
+    [InlineData("Skyrim Special Edition", "SkyrimVR")]
+    [InlineData("Fallout 4", "SkyrimSE")]
+    public void RejectsUnsupportedOrMismatchedMo2Game(string configuredName, string requestedGame)
     {
-        var result = _driver.Run("scripts/shared.pex", game: "SkyrimVR");
+        var root = CopyFixture();
+        var organizerIni = Path.Combine(root, "ModOrganizer.ini");
+        File.WriteAllText(
+            organizerIni,
+            File.ReadAllText(organizerIni).Replace(
+                "gameName=Skyrim Special Edition",
+                $"gameName={configuredName}",
+                StringComparison.Ordinal));
+
+        var result = _driver.Run("scripts/shared.pex", game: requestedGame, root: root);
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(string.Empty, result.Stdout);
-        Assert.Contains("does not match", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("gameName", result.Stderr, StringComparison.Ordinal);
     }
 
     [Fact]
