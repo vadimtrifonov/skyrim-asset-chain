@@ -1,0 +1,33 @@
+[tools]
+dotnet = "10"
+
+[tasks.restore]
+run = "dotnet restore skyrim-asset-chain.slnx --locked-mode"
+
+[tasks.build]
+depends = ["restore"]
+run = "dotnet build skyrim-asset-chain.slnx --no-restore --configuration Release"
+
+[tasks.test]
+depends = ["restore"]
+run = "dotnet test skyrim-asset-chain.slnx --no-restore --configuration Release"
+
+[tasks.publish]
+shell = "powershell.exe -NoProfile -Command"
+run = [
+  '''
+  $paths = @(
+    'artifacts/skyrim-asset-chain-0.1.0-windows-x64'
+    'artifacts/skyrim-asset-chain-0.1.0-windows-x64.zip'
+  )
+
+  foreach ($path in $paths) {
+    if (Test-Path $path) {
+      Remove-Item -Recurse -Force $path
+    }
+  }
+  ''',
+  "dotnet restore src/Skyrim.AssetChain/Skyrim.AssetChain.csproj --locked-mode --runtime win-x64",
+  "dotnet publish src/Skyrim.AssetChain/Skyrim.AssetChain.csproj --configuration Release --no-restore --no-self-contained --runtime win-x64 -p:DebugType=None -p:DebugSymbols=false --output artifacts/skyrim-asset-chain-0.1.0-windows-x64",
+  "& C:/Windows/System32/tar.exe -a -c -f artifacts/skyrim-asset-chain-0.1.0-windows-x64.zip -C artifacts/skyrim-asset-chain-0.1.0-windows-x64 .",
+]

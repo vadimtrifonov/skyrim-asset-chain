@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Skyrim.AssetChain/Skyrim.AssetChain.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Skyrim.AssetChain.Tests/Skyrim.AssetChain.Tests.csproj" />
+  </Folder>
+</Solution>
