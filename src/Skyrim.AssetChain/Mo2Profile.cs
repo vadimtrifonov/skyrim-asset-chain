@@ -32,6 +32,9 @@ internal sealed class Mo2Profile
         "Skyrim - Patch.bsa"
     ];
 
+    private static readonly string[] DefaultSkipFileSuffixes = [".mohidden"];
+    private static readonly string[] DefaultSkipDirectories = [".git"];
+
     private Mo2Profile(
         GameKind game,
         string instanceRoot,
@@ -70,10 +73,14 @@ internal sealed class Mo2Profile
         var organizerIni = IniFile.Read(organizerIniPath);
         ValidateConfiguredGame(
             game,
-            CleanQSettingsValue(organizerIni.Get("General", "gameName")),
+            QSettingsValue.DecodeString(
+                organizerIni.Get("General", "gameName"),
+                $"[General] gameName in {organizerIniPath}"),
             organizerIniPath);
 
-        var gamePathValue = CleanQSettingsValue(organizerIni.Get("General", "gamePath"));
+        var gamePathValue = QSettingsValue.DecodeString(
+            organizerIni.Get("General", "gamePath"),
+            $"[General] gamePath in {organizerIniPath}");
         if (string.IsNullOrWhiteSpace(gamePathValue))
         {
             throw new InvalidOperationException($"{organizerIniPath} has no [General] gamePath value.");
@@ -83,25 +90,30 @@ internal sealed class Mo2Profile
         var dataFolder = Path.Combine(gameRoot, "Data");
         RequireDirectory(dataFolder, "Physical game Data directory");
 
-        var baseValue = CleanQSettingsValue(organizerIni.Get("Settings", "base_directory"));
+        var baseValue = QSettingsValue.DecodeString(
+            organizerIni.Get("Settings", "base_directory"),
+            $"[Settings] base_directory in {organizerIniPath}");
         var baseDirectory = string.IsNullOrWhiteSpace(baseValue)
             ? instanceRoot
             : ResolvePath(baseValue, instanceRoot, instanceRoot, "base_directory");
 
         var modsFolder = ResolveConfiguredDirectory(
             organizerIni,
+            organizerIniPath,
             "mod_directory",
             "mods",
             instanceRoot,
             baseDirectory);
         var profilesFolder = ResolveConfiguredDirectory(
             organizerIni,
+            organizerIniPath,
             "profiles_directory",
             "profiles",
             instanceRoot,
             baseDirectory);
         var overwriteFolder = ResolveConfiguredDirectory(
             organizerIni,
+            organizerIniPath,
             "overwrite_directory",
             "overwrite",
             instanceRoot,
@@ -124,7 +136,8 @@ internal sealed class Mo2Profile
         var loadOrderPath = Path.Combine(profileFolder, "loadorder.txt");
 
         var enabledMods = ReadEnabledMods(modlistPath, modsFolder);
-        var layers = BuildLayers(dataFolder, enabledMods, overwriteFolder);
+        var skipRules = ReadSkipRules(organizerIni, organizerIniPath);
+        var layers = BuildLayers(dataFolder, enabledMods, overwriteFolder, skipRules);
         var activePlugins = BuildActivePlugins(game, gameRoot, pluginsPath, layers);
         var loadOrderValidation = File.Exists(loadOrderPath)
             ? ReadLoadOrder(loadOrderPath)
@@ -166,19 +179,20 @@ internal sealed class Mo2Profile
     private static IReadOnlyList<SourceLayer> BuildLayers(
         string dataFolder,
         IReadOnlyList<EnabledMod> enabledMods,
-        string overwriteFolder)
+        string overwriteFolder,
+        Mo2SkipRules skipRules)
     {
         var layers = new List<SourceLayer>(enabledMods.Count + 2)
         {
-            SourceLayer.Create("Game Data", dataFolder, modlistIndex: null, required: true)
+            SourceLayer.Create("Game Data", dataFolder, modlistIndex: null, required: true, skipRules: null)
         };
 
         foreach (var mod in enabledMods.Reverse())
         {
-            layers.Add(SourceLayer.Create(mod.Name, mod.Path, mod.ModlistIndex, required: true));
+            layers.Add(SourceLayer.Create(mod.Name, mod.Path, mod.ModlistIndex, required: true, skipRules: skipRules));
         }
 
-        layers.Add(SourceLayer.Create("Overwrite", overwriteFolder, modlistIndex: null, required: false));
+        layers.Add(SourceLayer.Create("Overwrite", overwriteFolder, modlistIndex: null, required: false, skipRules: skipRules));
         return layers;
     }
 
@@ -541,14 +555,49 @@ internal sealed class Mo2Profile
         string reason) =>
         new($"Malformed profile entry in {path}, line {line}: {reason}: {raw}");
 
+    private static Mo2SkipRules ReadSkipRules(IniFile ini, string iniPath) =>
+        new(
+            ReadQSettingsStringList(
+                ini,
+                iniPath,
+                "skip_file_suffixes",
+                DefaultSkipFileSuffixes),
+            ReadQSettingsStringList(
+                ini,
+                iniPath,
+                "skip_directories",
+                DefaultSkipDirectories));
+
+    private static IReadOnlyList<string> ReadQSettingsStringList(
+        IniFile ini,
+        string iniPath,
+        string key,
+        IReadOnlyList<string> defaultValue)
+    {
+        if (!ini.TryGet("Settings", key, out var raw))
+        {
+            return defaultValue.ToArray();
+        }
+
+        return QSettingsValue.DecodeStringList(
+                raw,
+                $"[Settings] {key} in {iniPath}")
+            .Where(item => item.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private static string ResolveConfiguredDirectory(
         IniFile ini,
+        string iniPath,
         string key,
         string defaultName,
         string instanceRoot,
         string baseDirectory)
     {
-        var value = CleanQSettingsValue(ini.Get("Settings", key));
+        var value = QSettingsValue.DecodeString(
+            ini.Get("Settings", key),
+            $"[Settings] {key} in {iniPath}");
         value = string.IsNullOrWhiteSpace(value) ? $"%BASE_DIR%/{defaultName}" : value;
         return ResolvePath(value, instanceRoot, baseDirectory, key);
     }
@@ -583,37 +632,6 @@ internal sealed class Mo2Profile
         }
 
         return value;
-    }
-
-    private static string? CleanQSettingsValue(string? raw)
-    {
-        if (raw is null)
-        {
-            return null;
-        }
-
-        var value = raw.Trim();
-        if (value.Length == 0 || value.Equals("@Invalid()", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        const string wrapper = "@ByteArray(";
-        if (value.StartsWith(wrapper, StringComparison.Ordinal))
-        {
-            if (!value.EndsWith(')'))
-            {
-                throw new InvalidOperationException($"Malformed QSettings byte-array value: {raw}");
-            }
-
-            value = value[wrapper.Length..^1];
-        }
-        else if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
-        {
-            value = value[1..^1];
-        }
-
-        return value.Replace("\\\\", "\\", StringComparison.Ordinal);
     }
 
     private static bool ParseBoolean(string value, string path, string key)
@@ -683,16 +701,34 @@ internal sealed class Mo2Profile
     private sealed record EnabledMod(string Name, string Path, int ModlistIndex);
 }
 
+internal sealed record Mo2SkipRules(
+    IReadOnlyList<string> FileSuffixes,
+    IReadOnlyList<string> Directories)
+{
+    internal bool SkipsFile(string fileName) =>
+        FileSuffixes.Any(suffix => fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+
+    internal bool SkipsDirectory(string directoryName) =>
+        Directories.Contains(directoryName, StringComparer.OrdinalIgnoreCase);
+}
+
 internal sealed class SourceLayer
 {
     private readonly Dictionary<string, string> _rootFiles;
+    private readonly Mo2SkipRules? _skipRules;
 
-    private SourceLayer(string origin, string root, int? modlistIndex, bool exists)
+    private SourceLayer(
+        string origin,
+        string root,
+        int? modlistIndex,
+        bool exists,
+        Mo2SkipRules? skipRules)
     {
         Origin = origin;
         Root = root;
         ModlistIndex = modlistIndex;
         Exists = exists;
+        _skipRules = skipRules;
         _rootFiles = exists ? IndexRootFiles() : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     }
 
@@ -705,7 +741,8 @@ internal sealed class SourceLayer
         string origin,
         string root,
         int? modlistIndex,
-        bool required)
+        bool required,
+        Mo2SkipRules? skipRules)
     {
         var exists = Directory.Exists(root);
         if (required && !exists)
@@ -718,7 +755,7 @@ internal sealed class SourceLayer
             EnsureReadable(origin, root);
         }
 
-        return new SourceLayer(origin, root, modlistIndex, exists);
+        return new SourceLayer(origin, root, modlistIndex, exists, skipRules);
     }
 
     internal string? FindRootFile(string fileName) =>
@@ -732,8 +769,14 @@ internal sealed class SourceLayer
         }
 
         var segments = canonicalPath.Split('/');
+        if (_skipRules is not null &&
+            (_skipRules.SkipsFile(segments[^1]) || segments[..^1].Any(_skipRules.SkipsDirectory)))
+        {
+            return null;
+        }
+
         var candidate = Path.Combine([Root, .. segments]);
-        if (File.Exists(candidate + ".mohidden") || !File.Exists(candidate))
+        if (!File.Exists(candidate))
         {
             return null;
         }
@@ -779,17 +822,12 @@ internal sealed class SourceLayer
         try
         {
             var files = Directory.EnumerateFiles(Root, "*", SearchOption.TopDirectoryOnly).ToArray();
-            var hidden = files
-                .Select(path => Path.GetFileName(path)!)
-                .Where(name => name.EndsWith(".mohidden", StringComparison.OrdinalIgnoreCase))
-                .Select(name => name[..^".mohidden".Length])
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var path in files)
             {
                 var name = Path.GetFileName(path);
-                if (name.EndsWith(".mohidden", StringComparison.OrdinalIgnoreCase) || hidden.Contains(name))
+                if (_skipRules?.SkipsFile(name) is true)
                 {
                     continue;
                 }

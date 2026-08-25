@@ -130,13 +130,110 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
     }
 
     [Fact]
-    public void MohiddenFileSuppressesOnlyItsOwnSource()
+    public void MohiddenFileIsSkippedWithoutHidingItsUnsuffixedSibling()
     {
         var rows = ParseRows(_driver.Run("scripts/hidden.pex"));
 
-        Assert.Single(rows);
-        Assert.Equal("Low", rows[0].GetProperty("sourceOrigin").GetString());
-        Assert.True(rows[0].GetProperty("winner").GetBoolean());
+        Assert.Equal(new[] { "Low", "Middle" },
+            rows.Select(row => row.GetProperty("sourceOrigin").GetString()));
+        Assert.True(rows[^1].GetProperty("winner").GetBoolean());
+
+        var hidden = _driver.Run("scripts/hidden.pex.mohidden");
+        Assert.NotEqual(0, hidden.ExitCode);
+        Assert.Equal(string.Empty, hidden.Stdout);
+        Assert.Contains("no eligible provider", hidden.Stderr, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MohiddenSiblingsDoNotHideUnsuffixedPluginOrArchive()
+    {
+        var rows = ParseRows(_driver.Run("scripts/shared.pex"));
+
+        var omega = Assert.Single(rows, row => row.GetProperty("archive").GetString() == "Omega.bsa");
+        Assert.Equal("Omega.esp", omega.GetProperty("associatedPlugin").GetString());
+        Assert.True(omega.GetProperty("winner").GetBoolean());
+    }
+
+    [Fact]
+    public void UsvfsSkipSuffixDoesNotFilterPhysicalGameData()
+    {
+        var rows = ParseRows(_driver.Run("scripts/physical.pex.mohidden"));
+
+        var row = Assert.Single(rows);
+        Assert.Equal("Game Data", row.GetProperty("sourceOrigin").GetString());
+        Assert.True(row.GetProperty("winner").GetBoolean());
+    }
+
+    [Fact]
+    public void DefaultSkippedDirectoryDoesNotEnterVirtualData()
+    {
+        var result = _driver.Run(".git/skipped.pex");
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Equal(string.Empty, result.Stdout);
+        Assert.Contains("no eligible provider", result.Stderr, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void HonorsConfiguredUsvfsSkipLists()
+    {
+        var root = fixture.CreateCopy();
+        try
+        {
+            File.AppendAllText(
+                Path.Combine(root, "ModOrganizer.ini"),
+                ("\nskip_file_suffixes=.mohidden, .ignored, @@ignored, \".comma,suffix\"\n" +
+                 "skip_directories=.git, Cache\n").ReplaceLineEndings());
+            var middle = Path.Combine(root, "managed-mods", "Middle");
+            var suffixFile = Path.Combine(middle, "Scripts", "Custom.pex.ignored");
+            Directory.CreateDirectory(Path.GetDirectoryName(suffixFile)!);
+            File.WriteAllText(suffixFile, "skipped suffix");
+            File.WriteAllText(Path.Combine(middle, "Scripts", "Custom.pex@ignored"), "escaped at suffix");
+            File.WriteAllText(Path.Combine(middle, "Scripts", "Custom.pex.comma,suffix"), "quoted comma suffix");
+            var directoryFile = Path.Combine(middle, "Cache", "Custom.pex");
+            Directory.CreateDirectory(Path.GetDirectoryName(directoryFile)!);
+            File.WriteAllText(directoryFile, "skipped directory");
+
+            foreach (var path in new[]
+                     {
+                         "scripts/custom.pex.ignored",
+                         "scripts/custom.pex@ignored",
+                         "scripts/custom.pex.comma,suffix",
+                         "cache/custom.pex"
+                     })
+            {
+                var result = _driver.Run(path, root: root);
+                Assert.NotEqual(0, result.ExitCode);
+                Assert.Equal(string.Empty, result.Stdout);
+                Assert.Contains("no eligible provider", result.Stderr, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void EmptyConfiguredSuffixListDoesNotApplyMohiddenDefault()
+    {
+        var root = fixture.CreateCopy();
+        try
+        {
+            File.AppendAllText(
+                Path.Combine(root, "ModOrganizer.ini"),
+                "\nskip_file_suffixes=@Invalid()\n".ReplaceLineEndings());
+
+            var rows = ParseRows(_driver.Run("scripts/hidden.pex.mohidden", root: root));
+
+            var row = Assert.Single(rows);
+            Assert.Equal("Middle", row.GetProperty("sourceOrigin").GetString());
+            Assert.True(row.GetProperty("winner").GetBoolean());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]

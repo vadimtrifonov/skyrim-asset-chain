@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Skyrim.AssetChain.Tests;
 
 public sealed class AssetChainFixture : IDisposable
@@ -27,12 +29,12 @@ public sealed class AssetChainFixture : IDisposable
         WriteSources();
     }
 
-    public string CreateCopy()
+    public string CreateCopy(string namePrefix = "")
     {
         var copy = Path.Combine(
             Path.GetTempPath(),
             "skyrim-asset-chain-tests",
-            Guid.NewGuid().ToString("N"));
+            namePrefix + Guid.NewGuid().ToString("N"));
         CopyDirectory(Root, copy);
         WriteInstanceSettings(copy);
         return copy;
@@ -51,13 +53,12 @@ public sealed class AssetChainFixture : IDisposable
     private static void WriteInstanceSettings(string root)
     {
         var gameRoot = Path.Combine(root, "Game Root");
-        var escapedGamePath = gameRoot.Replace("\\", "\\\\", StringComparison.Ordinal);
         File.WriteAllText(
             Path.Combine(root, "ModOrganizer.ini"),
             $$"""
             [General]
             gameName=Skyrim Special Edition
-            gamePath=@ByteArray({{escapedGamePath}})
+            gamePath={{EncodeQSettingsByteArray(gameRoot)}}
 
             [Settings]
             base_directory={{root.Replace("\\", "/", StringComparison.Ordinal)}}
@@ -66,6 +67,39 @@ public sealed class AssetChainFixture : IDisposable
             overwrite_directory=%BASE_DIR%/output
             profile_local_inis=true
             """.ReplaceLineEndings());
+    }
+
+    private static string EncodeQSettingsByteArray(string value)
+    {
+        var encoded = new StringBuilder("@ByteArray(");
+        var previousWasHexEscape = false;
+        foreach (var valueByte in Encoding.UTF8.GetBytes(value))
+        {
+            if (valueByte == '\\')
+            {
+                encoded.Append("\\\\");
+                previousWasHexEscape = false;
+            }
+            else if (valueByte is >= 0x20 and < 0x7F &&
+                     !(previousWasHexEscape && IsHexDigit(valueByte)))
+            {
+                encoded.Append((char)valueByte);
+                previousWasHexEscape = false;
+            }
+            else
+            {
+                encoded.Append($"\\x{valueByte:x2}");
+                previousWasHexEscape = true;
+            }
+        }
+
+        var result = encoded.Append(')').ToString();
+        return value.IndexOfAny([';', ',', '=']) >= 0 ? $"\"{result}\"" : result;
+
+        static bool IsHexDigit(byte valueByte) =>
+            valueByte is >= (byte)'0' and <= (byte)'9' or
+                >= (byte)'A' and <= (byte)'F' or
+                >= (byte)'a' and <= (byte)'f';
     }
 
     private void WriteProfile()
@@ -159,6 +193,7 @@ public sealed class AssetChainFixture : IDisposable
         CopyArchive("archive-a.bsa", Path.Combine(DataFolder, "BaseA.bsa"));
         CopyArchive("archive-b-compressed.bsa", Path.Combine(DataFolder, "BaseB.bsa"));
         WriteLoose(DataFolder, "Scripts/LooseOnly.PEX", "game");
+        WriteLoose(DataFolder, "Scripts/Physical.pex.mohidden", "physical game Data");
 
         var low = CreateMod("Low");
         File.WriteAllText(Path.Combine(low, "Alpha.esp"), "low plugin");
@@ -178,15 +213,19 @@ public sealed class AssetChainFixture : IDisposable
         CopyArchive("split-main.bsa", Path.Combine(middle, "Split.bsa"));
         CopyArchive("split-textures-compressed.bsa", Path.Combine(middle, "Split - Textures.bsa"));
         CopyArchive("archive-blocked.bsa", Path.Combine(middle, "Split - Meshes.bsa"));
-        WriteLoose(middle, "Scripts/Hidden.pex", "hidden higher copy");
-        WriteLoose(middle, "Scripts/Hidden.pex.mohidden", "hidden marker");
+        WriteLoose(middle, "Scripts/Hidden.pex", "visible higher copy");
+        WriteLoose(middle, "Scripts/Hidden.pex.mohidden", "separately skipped file");
+        WriteLoose(middle, "Scripts/Physical.pex.mohidden", "skipped mapped file");
+        WriteLoose(middle, ".git/Skipped.pex", "skipped directory");
 
         var high = CreateMod("High");
         File.WriteAllText(Path.Combine(high, "Alpha.esp"), "winning plugin copy");
         File.WriteAllText(Path.Combine(high, "Omega.esp"), "omega plugin");
+        File.WriteAllText(Path.Combine(high, "Omega.esp.mohidden"), "separately skipped plugin");
         CopyArchive("archive-no-shared.bsa", Path.Combine(high, "Foo.bsa"));
         CopyArchive("archive-b-compressed.bsa", Path.Combine(high, "Shadow.bsa"));
         CopyArchive("archive-b-compressed.bsa", Path.Combine(high, "Omega.bsa"));
+        CopyArchive("archive-blocked.bsa", Path.Combine(high, "Omega.bsa.mohidden"));
         WriteLoose(high, "SCRIPTS/LooseOnly.pex", "high");
 
         var disabled = CreateMod("Disabled");

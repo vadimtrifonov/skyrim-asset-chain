@@ -30,6 +30,22 @@ public sealed class Mo2ProfileTests(AssetChainFixture fixture) : IClassFixture<A
     }
 
     [Fact]
+    public void DecodesUtf8QSettingsByteArrayPath()
+    {
+        var root = CopyFixture("Tést-");
+
+        var rows = ParseRows(_driver.Run("scripts/shared.pex", root: root));
+
+        var gameData = Assert.Single(rows, row =>
+            row.GetProperty("sourceOrigin").GetString() == "Game Data" &&
+            row.GetProperty("archive").GetString() == "BaseA.bsa");
+        Assert.StartsWith(
+            NormalizePath(root) + "/",
+            NormalizePath(gameData.GetProperty("sourcePath").GetString()!),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void MissingEnabledModDirectoryFailsWithoutOutput()
     {
         var root = CopyFixture();
@@ -220,9 +236,9 @@ public sealed class Mo2ProfileTests(AssetChainFixture fixture) : IClassFixture<A
         return root;
     }
 
-    private string CopyFixture()
+    private string CopyFixture(string namePrefix = "")
     {
-        var copy = fixture.CreateCopy();
+        var copy = fixture.CreateCopy(namePrefix);
         _copies.Add(copy);
         return copy;
     }

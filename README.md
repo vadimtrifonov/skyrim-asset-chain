@@ -89,7 +89,6 @@ The command writes compact JSONL. Each row describes one eligible provider entry
 Archive rows come first in archive-load order. Loose rows follow in MO2 priority order.
 
 The command reports matching members from shadowed physical copies of an active BSA name. Only the runtime-selected entry has `winner:true`.
-
 A successful chain can contain only `winner:false` rows. This result means that matching entries exist, but container shadowing blocks all of them.
 
 Diagnostics use standard error. An error returns a nonzero exit code and produces no JSONL output.
@@ -98,18 +97,26 @@ Diagnostics use standard error. An error returns a nonzero exit code and produce
 
 The command applies these rules:
 
-1. MO2 priority selects the physical copy of each logical BSA name.
-2. The game archive order selects among surviving BSA members.
-3. Loose files override BSA members.
-4. MO2 priority selects among loose files.
+1. MO2 skip rules filter files from enabled mods and `Overwrite`, but not from physical game `Data`.
+2. MO2 priority selects the physical copy of each logical BSA name.
+3. The game archive order selects among surviving BSA members.
+4. Loose files override BSA members.
+5. MO2 priority selects among loose files.
 
-For Skyrim SE, an active plugin loads only these associated names:
+The command reads `skip_file_suffixes` and `skip_directories` from `[Settings]` in `<MO2 root>\ModOrganizer.ini`.
+If a setting is absent, the command uses the MO2 default: `.mohidden` for suffixes and `.git` for directories.
+An explicitly empty list supplies no entries for that setting.
+A skipped file does not hide an unsuffixed sibling.
+
+For Skyrim SE, the engine derives two associated BSA names from each active plugin. For `Example.esp`, these names are:
 
 ```text
 Example.bsa
 Example - Textures.bsa
 ```
 
-The `- Textures` archive loads after the plain archive. Skyrim VR applies `sVrResourceArchiveList` after plugin archives.
+If both archives exist, the engine registers `Example.bsa` first and `Example - Textures.bsa` second.
+Other BSA names require another registration mechanism, such as an archive-list INI setting.
 
+Skyrim VR applies `sVrResourceArchiveList` after plugin archives.
 If the VR list loads no archive, the engine registers `Skyrim_VR - Main.bsa` by default.
