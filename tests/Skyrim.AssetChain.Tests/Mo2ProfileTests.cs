@@ -46,6 +46,40 @@ public sealed class Mo2ProfileTests(AssetChainFixture fixture) : IClassFixture<A
     }
 
     [Fact]
+    public void MissingLocalIniSettingsUseMo2ProfileDefault()
+    {
+        var root = CopyFixture();
+        var organizerIni = Path.Combine(root, "ModOrganizer.ini");
+        File.WriteAllText(
+            organizerIni,
+            File.ReadAllText(organizerIni).Replace(
+                "profile_local_inis=true",
+                string.Empty,
+                StringComparison.Ordinal));
+
+        var profile = Path.Combine(root, "named-profiles", fixture.ProfileName);
+        var profileSettings = Path.Combine(profile, "settings.ini");
+        File.WriteAllText(
+            profileSettings,
+            File.ReadAllText(profileSettings).Replace(
+                "LocalSettings=true",
+                string.Empty,
+                StringComparison.Ordinal));
+
+        const string archiveName = "ProfileDefault.bsa";
+        File.Copy(
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "archive-b-compressed.bsa"),
+            Path.Combine(root, "Game Root", "Data", archiveName));
+        File.WriteAllText(
+            Path.Combine(profile, "skyrimcustom.ini"),
+            $"[Archive]{Environment.NewLine}sResourceArchiveList={archiveName}{Environment.NewLine}");
+
+        var rows = ParseRows(_driver.Run("scripts/shared.pex", root: root));
+
+        Assert.Single(rows, row => row.GetProperty("archive").GetString() == archiveName);
+    }
+
+    [Fact]
     public void MissingEnabledModDirectoryFailsWithoutOutput()
     {
         var root = CopyFixture();

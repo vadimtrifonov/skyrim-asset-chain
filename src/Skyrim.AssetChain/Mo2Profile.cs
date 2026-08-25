@@ -415,7 +415,7 @@ internal sealed class Mo2Profile
         var localSetting = profileSettings.Get("General", "LocalSettings");
         var profileLocal = localSetting is not null
             ? ParseBoolean(localSetting, profileSettingsPath, "LocalSettings")
-            : ParseOptionalBoolean(organizerIni.Get("Settings", "profile_local_inis")) ?? false;
+            : ParseOptionalBoolean(organizerIni.Get("Settings", "profile_local_inis")) ?? true;
 
         string iniFolder;
         if (profileLocal)
