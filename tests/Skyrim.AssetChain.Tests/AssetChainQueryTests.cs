@@ -116,6 +116,12 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
     }
 
     [Fact]
+    public void ProviderChainCanBeEmpty()
+    {
+        Assert.Empty(ParseRows(_driver.Run("scripts/missing.pex")));
+    }
+
+    [Fact]
     public void ResolvesLooseFilesAfterArchivesByMo2Priority()
     {
         var rows = ParseRows(_driver.Run("/scripts/LOOSEONLY.pex"));
@@ -205,10 +211,7 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
             rows.Select(row => row.GetProperty("sourceOrigin").GetString()));
         Assert.True(rows[^1].GetProperty("winner").GetBoolean());
 
-        var hidden = _driver.Run("scripts/hidden.pex.mohidden");
-        Assert.NotEqual(0, hidden.ExitCode);
-        Assert.Equal(string.Empty, hidden.Stdout);
-        Assert.Contains("no loose file or registered BSA", hidden.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(ParseRows(_driver.Run("scripts/hidden.pex.mohidden")));
     }
 
     [Fact]
@@ -234,11 +237,7 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
     [Fact]
     public void DefaultSkippedDirectoryDoesNotEnterVirtualData()
     {
-        var result = _driver.Run(".git/skipped.pex");
-
-        Assert.NotEqual(0, result.ExitCode);
-        Assert.Equal(string.Empty, result.Stdout);
-        Assert.Contains("no loose file or registered BSA", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(ParseRows(_driver.Run(".git/skipped.pex")));
     }
 
     [Fact]
@@ -269,10 +268,7 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
                          "cache/custom.pex"
                      })
             {
-                var result = _driver.Run(path, root: root);
-                Assert.NotEqual(0, result.ExitCode);
-                Assert.Equal(string.Empty, result.Stdout);
-                Assert.Contains("no loose file or registered BSA", result.Stderr, StringComparison.OrdinalIgnoreCase);
+                Assert.Empty(ParseRows(_driver.Run(path, root: root)));
             }
         }
         finally
@@ -311,9 +307,7 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
         Assert.Single(rows);
         Assert.Equal("Low", rows[0].GetProperty("sourceOrigin").GetString());
 
-        var missing = _driver.Run("scripts/nested.pex");
-        Assert.NotEqual(0, missing.ExitCode);
-        Assert.Equal(string.Empty, missing.Stdout);
+        Assert.Empty(ParseRows(_driver.Run("scripts/nested.pex")));
     }
 
     [Fact]
@@ -330,11 +324,7 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
     [Fact]
     public void DisabledModDoesNotProvideAsset()
     {
-        var result = _driver.Run("scripts/disabledonly.pex");
-
-        Assert.NotEqual(0, result.ExitCode);
-        Assert.Equal(string.Empty, result.Stdout);
-        Assert.Contains("no loose file or registered BSA", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(ParseRows(_driver.Run("scripts/disabledonly.pex")));
     }
 
     [Theory]

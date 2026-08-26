@@ -1,21 +1,20 @@
 # Skyrim Asset Chain
 
-Skyrim Asset Chain reports the asset providers for one Mod Organizer 2 profile.
+Skyrim Asset Chain reports the loose files and BSA members for requested asset paths in a Mod Organizer 2 profile.
 
-It answers this question for each Data-relative path:
+It answers one question for each asset path in the game `Data` folder:
 
-> Which eligible sources contain this asset, and which source wins?
-
-The tool reports loose files and members of active BSA files. It does not inspect or compare asset content.
+> Which loose files and BSA members match this path, and which copy does the game use?
 
 ## Requirements
 
 - Windows
 - .NET 10 runtime
 
-`SkyrimSE` includes Special Edition and Anniversary Edition. Use `SkyrimVR` for Skyrim VR.
-
 ## Usage
+
+Run the tool outside MO2. It reads the game `Data` folder, each enabled mod, and `Overwrite` directly.
+The tool stops if MO2 USVFS is active. USVFS combines these locations into one virtual `Data` folder and hides the origin of each file.
 
 Query one asset path:
 
@@ -27,7 +26,7 @@ skyrim-asset-chain.exe `
   "scripts/QF_MQ101_0003372B.pex"
 ```
 
-Query paths from a file:
+Use `--paths-from -` to read standard input:
 
 ```powershell
 skyrim-asset-chain.exe `
@@ -37,7 +36,7 @@ skyrim-asset-chain.exe `
   --paths-from "C:\Path\To\asset-paths.txt"
 ```
 
-Use `--paths-from -` to read standard input. Batch input contains one path per line.
+Batch input contains one path per line.
 
 The tool normalizes case and separators. For example, these inputs identify the same asset:
 
@@ -47,13 +46,11 @@ Scripts\qf_mq101_0003372b.PEX
 /scripts/QF_MQ101_0003372B.pex
 ```
 
-Run the tool outside MO2. It reads the game `Data` folder, each enabled mod, and `Overwrite` directly.
-
-The tool stops if MO2 USVFS is active. USVFS combines these locations into one virtual `Data` folder and hides the origin of each file.
+`--game` accepts `SkyrimSE` or `SkyrimVR`. `SkyrimSE` covers Special Edition and Anniversary Edition.
 
 ## Output
 
-The tool writes compact JSONL. Each row identifies one loose file or BSA member that contains the requested asset:
+The tool writes compact JSONL. Each row identifies one loose file or BSA member that matches the requested path:
 
 ```jsonl
 {"assetPath":"scripts/qf_mq101_0003372b.pex","providerIndex":0,"sourceKind":"archive","sourceOrigin":"Game Data","sourcePath":"C:/Game/Data/Skyrim - Misc.bsa","sourceAssetPath":"scripts/qf_mq101_0003372b.pex","archive":"Skyrim - Misc.bsa","archiveLoadMechanism":"ini-list","archiveLoadSource":"sResourceArchiveList","archiveLoadIndex":0,"associatedPlugin":null,"pluginLoadOrderIndex":null,"modlistIndex":null,"winner":false}
@@ -72,6 +69,9 @@ Archive rows come first in archive-load order. Loose rows follow in MO2 priority
 When the profile contains several copies of a registered BSA, the tool reports matching assets from every copy.
 Only the copy that the game uses can have `winner:true`.
 A successful query can report matches without a winner. This occurs when only overridden BSA files contain the asset.
+
+A requested path with no matching loose file or BSA member produces no row.
+A request with no matches succeeds with empty standard output.
 
 Diagnostics use standard error. An error returns a nonzero exit code and produces no JSONL output.
 

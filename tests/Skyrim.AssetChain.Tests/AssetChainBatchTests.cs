@@ -74,13 +74,42 @@ public sealed class AssetChainBatchTests(AssetChainFixture fixture) : IClassFixt
     }
 
     [Fact]
-    public void FailureAfterValidPathProducesNoOutput()
+    public void EmptyChainProducesNoRowsInBatch()
     {
-        var result = _driver.RunBatch("scripts/shared.pex\nscripts/missing.pex\n");
+        var result = _driver.RunBatch(
+            "scripts/blocked.pex\nscripts/missing.pex\nscripts/overwriteonly.pex\n");
+        var rows = ParseRows(result);
 
-        Assert.NotEqual(0, result.ExitCode);
-        Assert.Equal(string.Empty, result.Stdout);
-        Assert.Contains("scripts/missing.pex", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(string.Empty, result.Stderr);
+        Assert.Equal(
+            ["scripts/blocked.pex", "scripts/overwriteonly.pex"],
+            rows.Select(row => row.GetProperty("assetPath").GetString()));
+        Assert.Equal([0, 0],
+            rows.Select(row => row.GetProperty("providerIndex").GetInt32()));
+    }
+
+    [Fact]
+    public void BatchOutputIsAtomicOnOperationalError()
+    {
+        var root = fixture.CreateCopy();
+        try
+        {
+            var relativePath = Path.Combine("Scripts", "LooseOnly.pex");
+            Directory.CreateDirectory(Path.Combine(root, "managed-mods", "Middle", relativePath));
+            File.Delete(Path.Combine(root, "managed-mods", "High", relativePath));
+
+            var result = _driver.RunBatch(
+                "scripts/overwriteonly.pex\nscripts/looseonly.pex\n",
+                root: root);
+
+            Assert.NotEqual(0, result.ExitCode);
+            Assert.Equal(string.Empty, result.Stdout);
+            Assert.Contains("file/directory collision", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]

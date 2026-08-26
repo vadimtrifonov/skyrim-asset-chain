@@ -66,12 +66,6 @@ internal static class AssetChainQuery
             looseWinner = candidate;
         }
 
-        if (candidates.Count == 0)
-        {
-            throw new InvalidOperationException(
-                $"No loose file or registered BSA contains this asset in the selected profile: {assetPath}");
-        }
-
         var winner = looseWinner ?? archiveWinner;
         var rows = new List<AssetProviderRow>(candidates.Count);
         for (var index = 0; index < candidates.Count; index++)

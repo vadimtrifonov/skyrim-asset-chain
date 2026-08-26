@@ -97,7 +97,9 @@ internal static class CommandLine
         output.WriteLine("  skyrim-asset-chain --game <SkyrimSE|SkyrimVR> --mo2-root <instance> --profile <name> <asset-path>");
         output.WriteLine("  skyrim-asset-chain --game <SkyrimSE|SkyrimVR> --mo2-root <instance> --profile <name> --paths-from <path|->");
         output.WriteLine();
-        output.WriteLine("Writes compact JSONL rows for each requested Data-relative asset path.");
+        output.WriteLine("Writes one compact JSONL row for each matching loose file or BSA member.");
+        output.WriteLine("A requested path with no matches produces no row.");
+        output.WriteLine("A request with no matches succeeds with empty standard output.");
         output.WriteLine("Use --paths-from - to read one asset path per line from standard input.");
     }
 
