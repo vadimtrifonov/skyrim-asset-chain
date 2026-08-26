@@ -143,18 +143,18 @@ internal sealed class Mo2Profile
 
         var enabledMods = ReadEnabledMods(modlistPath, modsFolder);
         var skipRules = ReadSkipRules(organizerIni, organizerIniPath);
-        var layers = BuildLayers(dataFolder, enabledMods, overwriteFolder, skipRules);
-        var activePlugins = BuildActivePlugins(game, gameRoot, pluginsPath, layers);
+        var layers = BuildLayers(gameRoot, enabledMods, overwriteFolder, skipRules);
+        var activePlugins = BuildActivePlugins(game, pluginsPath, layers);
         RejectUnsupportedArchiveSettingsInPluginSidecars(activePlugins, layers);
         var loadOrderValidation = File.Exists(loadOrderPath)
             ? ReadLoadOrder(loadOrderPath)
             : Array.Empty<string>();
         var archiveSettings = ReadArchiveSettings(
             game,
-            gameRoot,
             profileFolder,
             settingsPath,
-            organizerIni);
+            organizerIni,
+            layers);
 
         return new Mo2Profile(
             game,
@@ -172,22 +172,32 @@ internal sealed class Mo2Profile
         ResolveDataFiles(LayersWeakToStrong, canonicalPath);
 
     private static IReadOnlyList<SourceLayer> BuildLayers(
-        string dataFolder,
+        string gameRoot,
         IReadOnlyList<EnabledMod> enabledMods,
         string overwriteFolder,
         Mo2SkipRules skipRules)
     {
         var layers = new List<SourceLayer>(enabledMods.Count + 2)
         {
-            SourceLayer.Create("Game Data", dataFolder, modlistIndex: null, required: true, skipRules: null)
+            SourceLayer.CreateGame("Game Data", gameRoot)
         };
 
         foreach (var mod in enabledMods.Reverse())
         {
-            layers.Add(SourceLayer.Create(mod.Name, mod.Path, mod.ModlistIndex, required: true, skipRules: skipRules));
+            layers.Add(SourceLayer.CreateMod(
+                mod.Name,
+                mod.Path,
+                mod.ModlistIndex,
+                required: true,
+                skipRules: skipRules));
         }
 
-        layers.Add(SourceLayer.Create("Overwrite", overwriteFolder, modlistIndex: null, required: false, skipRules: skipRules));
+        layers.Add(SourceLayer.CreateMod(
+            "Overwrite",
+            overwriteFolder,
+            modlistIndex: null,
+            required: false,
+            skipRules: skipRules));
         return layers;
     }
 
@@ -254,7 +264,6 @@ internal sealed class Mo2Profile
 
     private static IReadOnlyList<ActivePlugin> BuildActivePlugins(
         GameKind game,
-        string gameRoot,
         string pluginsPath,
         IReadOnlyList<SourceLayer> layers)
     {
@@ -268,10 +277,10 @@ internal sealed class Mo2Profile
             AddUnique(names, seen, modKey.FileName);
         }
 
-        var cccPath = Path.Combine(gameRoot, "Skyrim.ccc");
-        if (File.Exists(cccPath))
+        var creationClubFile = ResolveGameFiles(layers, "Skyrim.ccc").LastOrDefault();
+        if (creationClubFile is not null)
         {
-            foreach (var name in ReadCreationClubListings(cccPath))
+            foreach (var name in ReadCreationClubListings(creationClubFile.Path))
             {
                 if (ResolveDataFiles(layers, name).Count != 0)
                 {
@@ -431,10 +440,10 @@ internal sealed class Mo2Profile
 
     private static ArchiveIniSettings ReadArchiveSettings(
         GameKind game,
-        string gameRoot,
         string profileFolder,
         string profileSettingsPath,
-        IniFile organizerIni)
+        IniFile organizerIni,
+        IReadOnlyList<SourceLayer> layers)
     {
         var profileSettings = IniFile.Read(profileSettingsPath);
         var localSetting = profileSettings.Get("General", "LocalSettings");
@@ -459,7 +468,7 @@ internal sealed class Mo2Profile
         var customIniPath = Path.Combine(iniFolder, "skyrimcustom.ini");
         var tweaksPath = Path.Combine(profileFolder, "initweaks.ini");
 
-        var values = ReadDefaultArchiveValues(game, gameRoot);
+        var values = ReadDefaultArchiveValues(game, layers);
         OverlayArchiveValues(values, mainIniPath);
         OverlayArchiveValues(values, customIniPath);
         OverlayArchiveValues(values, tweaksPath);
@@ -470,7 +479,9 @@ internal sealed class Mo2Profile
             ParseArchiveList(values.GetValueOrDefault("sVrResourceArchiveList", string.Empty), "sVrResourceArchiveList"));
     }
 
-    private static Dictionary<string, string> ReadDefaultArchiveValues(GameKind game, string gameRoot)
+    private static Dictionary<string, string> ReadDefaultArchiveValues(
+        GameKind game,
+        IReadOnlyList<SourceLayer> layers)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -479,12 +490,21 @@ internal sealed class Mo2Profile
             ["sVrResourceArchiveList"] = string.Empty
         };
 
-        var defaultIniPath = Path.Combine(
-            gameRoot,
-            game == GameKind.SkyrimSE ? "Skyrim_Default.ini" : "Skyrim.ini");
-        OverlayArchiveValues(values, defaultIniPath);
+        var defaultIni = ResolveGameFiles(layers, GetDefaultGameIniName(game)).LastOrDefault();
+        if (defaultIni is not null)
+        {
+            OverlayArchiveValues(values, defaultIni.Path);
+        }
+
         return values;
     }
+
+    private static string GetDefaultGameIniName(GameKind game) => game switch
+    {
+        GameKind.SkyrimSE => "Skyrim_Default.ini",
+        GameKind.SkyrimVR => "Skyrim.ini",
+        _ => throw new ArgumentOutOfRangeException(nameof(game), game, null)
+    };
 
     private static void OverlayArchiveValues(IDictionary<string, string> values, string path)
     {
@@ -530,6 +550,11 @@ internal sealed class Mo2Profile
 
     private static IReadOnlyList<PhysicalSourceFile> ResolveDataFiles(
         IReadOnlyList<SourceLayer> layers,
+        string canonicalPath) =>
+        ResolveGameFiles(layers, $"data/{canonicalPath}");
+
+    private static IReadOnlyList<PhysicalSourceFile> ResolveGameFiles(
+        IReadOnlyList<SourceLayer> layers,
         string canonicalPath)
     {
         var files = new List<PhysicalSourceFile>();
@@ -556,7 +581,7 @@ internal sealed class Mo2Profile
         {
             var maskedFile = files[^1];
             throw new InvalidOperationException(
-                $"Unsupported MO2 file/directory collision for '{canonicalPath}': " +
+                $"Unsupported mapped file/directory collision for '{canonicalPath}': " +
                 $"directory from '{strongestLayer!.Origin}' masks file from " +
                 $"'{maskedFile.Layer.Origin}'. Directory: {strongestEntry.Path}. " +
                 $"File: {maskedFile.Path}");
@@ -756,35 +781,110 @@ internal sealed record Mo2SkipRules(
 
 internal sealed class SourceLayer
 {
-    private readonly Dictionary<string, SourceEntry> _rootEntries;
-    private readonly Mo2SkipRules? _skipRules;
+    private readonly IReadOnlyList<MappedSourceDirectory> _directories;
 
     private SourceLayer(
         string origin,
-        string root,
         int? modlistIndex,
+        IReadOnlyList<MappedSourceDirectory> directories)
+    {
+        Origin = origin;
+        ModlistIndex = modlistIndex;
+        _directories = directories;
+    }
+
+    internal string Origin { get; }
+    internal int? ModlistIndex { get; }
+
+    internal static SourceLayer CreateGame(string origin, string gameRoot) =>
+        new(
+            origin,
+            modlistIndex: null,
+            [
+                MappedSourceDirectory.Create(
+                    origin,
+                    Path.Combine(gameRoot, "Data"),
+                    destinationPrefix: "data",
+                    required: true,
+                    skipRules: null),
+                MappedSourceDirectory.Create(
+                    origin,
+                    gameRoot,
+                    destinationPrefix: string.Empty,
+                    required: true,
+                    skipRules: null)
+            ]);
+
+    // MO2 maps the mod root to Data; Root Builder maps its Root child to the game directory.
+    internal static SourceLayer CreateMod(
+        string origin,
+        string modRoot,
+        int? modlistIndex,
+        bool required,
+        Mo2SkipRules skipRules) =>
+        new(
+            origin,
+            modlistIndex,
+            [
+                MappedSourceDirectory.Create(
+                    origin,
+                    modRoot,
+                    destinationPrefix: "data",
+                    required: required,
+                    skipRules: skipRules),
+                MappedSourceDirectory.Create(
+                    origin,
+                    Path.Combine(modRoot, "Root"),
+                    destinationPrefix: string.Empty,
+                    required: false,
+                    skipRules: null)
+            ]);
+
+    internal SourceEntry? FindEntry(string canonicalGamePath)
+    {
+        // A specific mount, such as Data, owns its complete destination subtree.
+        foreach (var directory in _directories)
+        {
+            if (directory.TryMap(canonicalGamePath, out var sourceRelativePath))
+            {
+                return directory.FindEntry(sourceRelativePath, canonicalGamePath);
+            }
+        }
+
+        return null;
+    }
+}
+
+internal sealed class MappedSourceDirectory
+{
+    private readonly string _origin;
+    private readonly string _root;
+    private readonly string _destinationPrefix;
+    private readonly bool _exists;
+    private readonly Mo2SkipRules? _skipRules;
+    private readonly Dictionary<string, SourceEntry> _rootEntries;
+
+    private MappedSourceDirectory(
+        string origin,
+        string root,
+        string destinationPrefix,
         bool exists,
         Mo2SkipRules? skipRules)
     {
-        Origin = origin;
-        Root = root;
-        ModlistIndex = modlistIndex;
-        Exists = exists;
+        _origin = origin;
+        _root = root;
+        _destinationPrefix = destinationPrefix;
+        _exists = exists;
         _skipRules = skipRules;
         _rootEntries = exists
             ? IndexRootEntries()
             : new Dictionary<string, SourceEntry>(StringComparer.OrdinalIgnoreCase);
     }
 
-    internal string Origin { get; }
-    internal string Root { get; }
-    internal int? ModlistIndex { get; }
-    internal bool Exists { get; }
-
-    internal static SourceLayer Create(
+    internal static MappedSourceDirectory Create(
         string origin,
         string root,
-        int? modlistIndex,
+        string destinationPrefix,
         bool required,
         Mo2SkipRules? skipRules)
     {
@@ -799,17 +899,36 @@ internal sealed class SourceLayer
             EnsureReadable(origin, root);
         }
 
-        return new SourceLayer(origin, root, modlistIndex, exists, skipRules);
+        return new MappedSourceDirectory(origin, root, destinationPrefix, exists, skipRules);
     }
 
-    internal SourceEntry? FindEntry(string canonicalPath)
+    internal bool TryMap(string canonicalGamePath, out string sourceRelativePath)
     {
-        if (!Exists)
+        if (_destinationPrefix.Length == 0)
+        {
+            sourceRelativePath = canonicalGamePath;
+            return true;
+        }
+
+        var prefix = _destinationPrefix + "/";
+        if (canonicalGamePath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            sourceRelativePath = canonicalGamePath[prefix.Length..];
+            return true;
+        }
+
+        sourceRelativePath = string.Empty;
+        return false;
+    }
+
+    internal SourceEntry? FindEntry(string sourceRelativePath, string canonicalGamePath)
+    {
+        if (!_exists)
         {
             return null;
         }
 
-        var segments = canonicalPath.Split('/');
+        var segments = sourceRelativePath.Split('/');
         if (segments.Length == 1)
         {
             return _rootEntries.GetValueOrDefault(segments[0]);
@@ -822,7 +941,7 @@ internal sealed class SourceLayer
 
         try
         {
-            var current = Root;
+            var current = _root;
             var actualSegments = new List<string>(segments.Length);
             for (var index = 0; index < segments.Length; index++)
             {
@@ -839,7 +958,7 @@ internal sealed class SourceLayer
                     }
 
                     throw new InvalidOperationException(
-                        $"Source '{Origin}' contains ambiguous case variants for '{canonicalPath}'.");
+                        $"Source '{_origin}' contains ambiguous case variants for '{canonicalGamePath}'.");
                 }
 
                 current = matches[0];
@@ -851,7 +970,7 @@ internal sealed class SourceLayer
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             throw new InvalidOperationException(
-                $"Cannot inspect source directory for '{Origin}': {Root}",
+                $"Cannot inspect source directory for '{_origin}': {_root}",
                 exception);
         }
     }
@@ -861,7 +980,7 @@ internal sealed class SourceLayer
         try
         {
             var result = new Dictionary<string, SourceEntry>(StringComparer.OrdinalIgnoreCase);
-            foreach (var path in Directory.EnumerateFileSystemEntries(Root, "*", SearchOption.TopDirectoryOnly))
+            foreach (var path in Directory.EnumerateFileSystemEntries(_root, "*", SearchOption.TopDirectoryOnly))
             {
                 var entry = CreateEntry(path, Path.GetFileName(path));
                 if (entry is null)
@@ -872,7 +991,7 @@ internal sealed class SourceLayer
                 if (!result.TryAdd(entry.RelativePath, entry))
                 {
                     throw new InvalidOperationException(
-                        $"Source '{Origin}' contains ambiguous root entries named '{entry.RelativePath}'.");
+                        $"Source '{_origin}' contains ambiguous root entries named '{entry.RelativePath}'.");
                 }
             }
 
@@ -880,7 +999,7 @@ internal sealed class SourceLayer
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new InvalidOperationException($"Cannot read source directory for '{Origin}': {Root}", exception);
+            throw new InvalidOperationException($"Cannot read source directory for '{_origin}': {_root}", exception);
         }
     }
 

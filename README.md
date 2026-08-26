@@ -122,6 +122,17 @@ Other BSA names require another registration mechanism, such as an archive-list 
 Skyrim VR applies `sVrResourceArchiveList` after plugin archives.
 If the VR list loads no archive, the engine registers `Skyrim_VR - Main.bsa` by default.
 
+## Root Builder
+
+The command supports the conventional Root Builder layout. It applies these mappings to each enabled mod and `Overwrite`:
+
+- The mod directory uses the normal MO2 `Data` mapping.
+- The contents of its `Root` directory map to the game directory.
+
+The command assumes Root Builder behavior when an enabled mod or `Overwrite` contains a `Root` directory.
+It does not inspect the Root Builder installation or its enabled state.
+Custom Root Builder file patterns and exclusions are not supported.
+
 ## Limits
 
 The command does not model the runtime precedence of these known cases. It rejects them instead of inferring a winner:
@@ -132,4 +143,4 @@ The command does not model the runtime precedence of these known cases. It rejec
 The command does not report archives mounted by game menus or archive-loader extensions.
 This includes transient archives such as `MarketplaceTextures.bsa`.
 
-The command does not model custom mappings from MO2 plugins that use `IPluginFileMapper`.
+The command does not support custom mappings from other MO2 plugins that use `IPluginFileMapper`.

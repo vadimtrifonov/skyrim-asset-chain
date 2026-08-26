@@ -247,6 +247,67 @@ public sealed class Mo2ProfileTests(AssetChainFixture fixture) : IClassFixture<A
     }
 
     [Fact]
+    public void RootBuilderGameFilesFollowProfilePriority()
+    {
+        var root = CreateVrFixture(includeVrListSetting: false);
+        AddSource(Path.Combine(root, "Game Root"), "PhysicalRoot.bsa");
+        AddSource(Path.Combine(root, "managed-mods", "Low", "Root"), "LowRoot.bsa");
+        AddSource(Path.Combine(root, "managed-mods", "High", "Root"), "HighRoot.bsa");
+
+        Assert.Equal("HighRoot.bsa", GetWinningArchive());
+
+        AddSource(Path.Combine(root, "output", "Root"), "OverwriteRoot.bsa");
+
+        Assert.Equal("OverwriteRoot.bsa", GetWinningArchive());
+
+        void AddSource(string directory, string archiveName)
+        {
+            File.Copy(
+                Path.Combine(AppContext.BaseDirectory, "Fixtures", "archive-b-compressed.bsa"),
+                Path.Combine(root, "Game Root", "Data", archiveName));
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(
+                Path.Combine(directory, "Skyrim.ini"),
+                $"[Archive]{Environment.NewLine}sVrResourceArchiveList={archiveName}{Environment.NewLine}");
+        }
+
+        string? GetWinningArchive()
+        {
+            var rows = ParseRows(_driver.Run("scripts/shared.pex", game: "SkyrimVR", root: root));
+            return Assert.Single(rows, row => row.GetProperty("winner").GetBoolean())
+                .GetProperty("archive")
+                .GetString();
+        }
+    }
+
+    [Fact]
+    public void RootBuilderGameFileCanReplaceCreationClubListing()
+    {
+        var root = CopyFixture();
+        const string pluginName = "RootClub.esl";
+        var high = Path.Combine(root, "managed-mods", "High");
+        var rootDirectory = Path.Combine(high, "Root");
+        Directory.CreateDirectory(rootDirectory);
+        File.WriteAllText(Path.Combine(rootDirectory, "Skyrim.ccc"), pluginName + Environment.NewLine);
+        File.WriteAllText(Path.Combine(high, pluginName), string.Empty);
+        File.Copy(
+            Path.Combine(AppContext.BaseDirectory, "Fixtures", "archive-cc.bsa"),
+            Path.Combine(high, "RootClub.bsa"));
+
+        var loadOrderPath = Path.Combine(root, "named-profiles", fixture.ProfileName, "loadorder.txt");
+        File.WriteAllText(
+            loadOrderPath,
+            File.ReadAllText(loadOrderPath).Replace("ccFixture.esl", pluginName, StringComparison.Ordinal));
+
+        var rows = ParseRows(_driver.Run("scripts/creationclub.pex", root: root));
+
+        var row = Assert.Single(rows);
+        Assert.Equal("RootClub.bsa", row.GetProperty("archive").GetString());
+        Assert.Equal(pluginName, row.GetProperty("associatedPlugin").GetString());
+        Assert.Equal("High", row.GetProperty("sourceOrigin").GetString());
+    }
+
+    [Fact]
     public void VrUsesEngineDefaultWhenVrListLoadsNothing()
     {
         var root = CreateVrFixture(includeVrListSetting: false);
