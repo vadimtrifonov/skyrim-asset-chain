@@ -130,6 +130,33 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
     }
 
     [Fact]
+    public void RejectsStrongerDirectoryAtLooseAssetPath()
+    {
+        var root = fixture.CreateCopy();
+        try
+        {
+            var relativePath = Path.Combine("Scripts", "LooseOnly.pex");
+            Directory.CreateDirectory(Path.Combine(root, "managed-mods", "Middle", relativePath));
+
+            var rows = ParseRows(_driver.Run("scripts/looseonly.pex", root: root));
+            var winner = Assert.Single(rows, row => row.GetProperty("winner").GetBoolean());
+            Assert.Equal("High", winner.GetProperty("sourceOrigin").GetString());
+
+            File.Delete(Path.Combine(root, "managed-mods", "High", relativePath));
+            var blocked = _driver.Run("scripts/looseonly.pex", root: root);
+
+            Assert.NotEqual(0, blocked.ExitCode);
+            Assert.Equal(string.Empty, blocked.Stdout);
+            Assert.Contains("file/directory collision", blocked.Stderr, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Middle", blocked.Stderr, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void LooseProvidersOverrideArchiveChain()
     {
         var root = fixture.CreateCopy();
@@ -181,7 +208,7 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
         var hidden = _driver.Run("scripts/hidden.pex.mohidden");
         Assert.NotEqual(0, hidden.ExitCode);
         Assert.Equal(string.Empty, hidden.Stdout);
-        Assert.Contains("no eligible provider", hidden.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no loose file or registered BSA", hidden.Stderr, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -211,7 +238,7 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(string.Empty, result.Stdout);
-        Assert.Contains("no eligible provider", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no loose file or registered BSA", result.Stderr, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -245,7 +272,7 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
                 var result = _driver.Run(path, root: root);
                 Assert.NotEqual(0, result.ExitCode);
                 Assert.Equal(string.Empty, result.Stdout);
-                Assert.Contains("no eligible provider", result.Stderr, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("no loose file or registered BSA", result.Stderr, StringComparison.OrdinalIgnoreCase);
             }
         }
         finally
@@ -307,7 +334,7 @@ public sealed class AssetChainQueryTests(AssetChainFixture fixture) : IClassFixt
 
         Assert.NotEqual(0, result.ExitCode);
         Assert.Equal(string.Empty, result.Stdout);
-        Assert.Contains("no eligible provider", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("no loose file or registered BSA", result.Stderr, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

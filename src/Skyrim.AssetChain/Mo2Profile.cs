@@ -168,8 +168,8 @@ internal sealed class Mo2Profile
             archiveSettings);
     }
 
-    internal PhysicalSourceFile? ResolveRootFileStrongest(string fileName) =>
-        FindRootFileStrongest(LayersWeakToStrong, fileName);
+    internal IReadOnlyList<PhysicalSourceFile> ResolveDataFiles(string canonicalPath) =>
+        ResolveDataFiles(LayersWeakToStrong, canonicalPath);
 
     private static IReadOnlyList<SourceLayer> BuildLayers(
         string dataFolder,
@@ -273,7 +273,7 @@ internal sealed class Mo2Profile
         {
             foreach (var name in ReadCreationClubListings(cccPath))
             {
-                if (FindRootFileStrongest(layers, name) is not null)
+                if (ResolveDataFiles(layers, name).Count != 0)
                 {
                     AddUnique(names, seen, name);
                 }
@@ -289,7 +289,7 @@ internal sealed class Mo2Profile
         for (var index = 0; index < names.Count; index++)
         {
             var name = names[index];
-            var provider = FindRootFileStrongest(layers, name);
+            var provider = ResolveDataFiles(layers, name).LastOrDefault();
             if (provider is null)
             {
                 throw new FileNotFoundException(
@@ -309,7 +309,7 @@ internal sealed class Mo2Profile
         foreach (var plugin in activePlugins)
         {
             var sidecarName = Path.ChangeExtension(plugin.Name, ".ini");
-            var sidecar = FindRootFileStrongest(layers, sidecarName);
+            var sidecar = ResolveDataFiles(layers, sidecarName).LastOrDefault();
             if (sidecar is null)
             {
                 continue;
@@ -528,21 +528,41 @@ internal sealed class Mo2Profile
         return names;
     }
 
-    private static PhysicalSourceFile? FindRootFileStrongest(
+    private static IReadOnlyList<PhysicalSourceFile> ResolveDataFiles(
         IReadOnlyList<SourceLayer> layers,
-        string fileName)
+        string canonicalPath)
     {
-        for (var index = layers.Count - 1; index >= 0; index--)
+        var files = new List<PhysicalSourceFile>();
+        SourceLayer? strongestLayer = null;
+        SourceEntry? strongestEntry = null;
+
+        foreach (var layer in layers)
         {
-            var layer = layers[index];
-            var path = layer.FindRootFile(fileName);
-            if (path is not null)
+            var entry = layer.FindEntry(canonicalPath);
+            if (entry is null)
             {
-                return new PhysicalSourceFile(layer, path);
+                continue;
+            }
+
+            strongestLayer = layer;
+            strongestEntry = entry;
+            if (entry.Kind == SourceEntryKind.File)
+            {
+                files.Add(new PhysicalSourceFile(layer, entry.Path, entry.RelativePath));
             }
         }
 
-        return null;
+        if (strongestEntry?.Kind == SourceEntryKind.Directory && files.Count != 0)
+        {
+            var maskedFile = files[^1];
+            throw new InvalidOperationException(
+                $"Unsupported MO2 file/directory collision for '{canonicalPath}': " +
+                $"directory from '{strongestLayer!.Origin}' masks file from " +
+                $"'{maskedFile.Layer.Origin}'. Directory: {strongestEntry.Path}. " +
+                $"File: {maskedFile.Path}");
+        }
+
+        return files;
     }
 
     private static void AddUnique(
@@ -736,7 +756,7 @@ internal sealed record Mo2SkipRules(
 
 internal sealed class SourceLayer
 {
-    private readonly Dictionary<string, string> _rootFiles;
+    private readonly Dictionary<string, SourceEntry> _rootEntries;
     private readonly Mo2SkipRules? _skipRules;
 
     private SourceLayer(
@@ -751,7 +771,9 @@ internal sealed class SourceLayer
         ModlistIndex = modlistIndex;
         Exists = exists;
         _skipRules = skipRules;
-        _rootFiles = exists ? IndexRootFiles() : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _rootEntries = exists
+            ? IndexRootEntries()
+            : new Dictionary<string, SourceEntry>(StringComparer.OrdinalIgnoreCase);
     }
 
     internal string Origin { get; }
@@ -780,10 +802,7 @@ internal sealed class SourceLayer
         return new SourceLayer(origin, root, modlistIndex, exists, skipRules);
     }
 
-    internal string? FindRootFile(string fileName) =>
-        _rootFiles.GetValueOrDefault(fileName);
-
-    internal LooseSourceFile? FindLooseFile(string canonicalPath)
+    internal SourceEntry? FindEntry(string canonicalPath)
     {
         if (!Exists)
         {
@@ -791,14 +810,12 @@ internal sealed class SourceLayer
         }
 
         var segments = canonicalPath.Split('/');
-        if (_skipRules is not null &&
-            (_skipRules.SkipsFile(segments[^1]) || segments[..^1].Any(_skipRules.SkipsDirectory)))
+        if (segments.Length == 1)
         {
-            return null;
+            return _rootEntries.GetValueOrDefault(segments[0]);
         }
 
-        var candidate = Path.Combine([Root, .. segments]);
-        if (!File.Exists(candidate))
+        if (_skipRules is not null && segments[..^1].Any(_skipRules.SkipsDirectory))
         {
             return null;
         }
@@ -812,7 +829,7 @@ internal sealed class SourceLayer
                 var isLast = index == segments.Length - 1;
                 var matches = Directory.EnumerateFileSystemEntries(current)
                     .Where(path => Path.GetFileName(path).Equals(segments[index], StringComparison.OrdinalIgnoreCase))
-                    .Where(path => isLast ? File.Exists(path) : Directory.Exists(path))
+                    .Where(path => isLast || Directory.Exists(path))
                     .ToArray();
                 if (matches.Length != 1)
                 {
@@ -829,7 +846,7 @@ internal sealed class SourceLayer
                 actualSegments.Add(Path.GetFileName(current));
             }
 
-            return new LooseSourceFile(current, string.Join('/', actualSegments));
+            return CreateEntry(current, string.Join('/', actualSegments));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -839,25 +856,23 @@ internal sealed class SourceLayer
         }
     }
 
-    private Dictionary<string, string> IndexRootFiles()
+    private Dictionary<string, SourceEntry> IndexRootEntries()
     {
         try
         {
-            var files = Directory.EnumerateFiles(Root, "*", SearchOption.TopDirectoryOnly).ToArray();
-            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var path in files)
+            var result = new Dictionary<string, SourceEntry>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in Directory.EnumerateFileSystemEntries(Root, "*", SearchOption.TopDirectoryOnly))
             {
-                var name = Path.GetFileName(path);
-                if (_skipRules?.SkipsFile(name) is true)
+                var entry = CreateEntry(path, Path.GetFileName(path));
+                if (entry is null)
                 {
                     continue;
                 }
 
-                if (!result.TryAdd(name, path))
+                if (!result.TryAdd(entry.RelativePath, entry))
                 {
                     throw new InvalidOperationException(
-                        $"Source '{Origin}' contains ambiguous root files named '{name}'.");
+                        $"Source '{Origin}' contains ambiguous root entries named '{entry.RelativePath}'.");
                 }
             }
 
@@ -867,6 +882,23 @@ internal sealed class SourceLayer
         {
             throw new InvalidOperationException($"Cannot read source directory for '{Origin}': {Root}", exception);
         }
+    }
+
+    private SourceEntry? CreateEntry(string path, string relativePath)
+    {
+        var kind = File.GetAttributes(path).HasFlag(FileAttributes.Directory)
+            ? SourceEntryKind.Directory
+            : SourceEntryKind.File;
+        var name = Path.GetFileName(path);
+        var skipped = kind == SourceEntryKind.Directory
+            ? _skipRules?.SkipsDirectory(name) is true
+            : _skipRules?.SkipsFile(name) is true;
+        if (skipped)
+        {
+            return null;
+        }
+
+        return new SourceEntry(kind, path, relativePath);
     }
 
     private static void EnsureReadable(string origin, string root)
@@ -882,8 +914,14 @@ internal sealed class SourceLayer
     }
 }
 
-internal sealed record PhysicalSourceFile(SourceLayer Layer, string Path);
-internal sealed record LooseSourceFile(string Path, string RelativePath);
+internal enum SourceEntryKind
+{
+    File,
+    Directory
+}
+
+internal sealed record SourceEntry(SourceEntryKind Kind, string Path, string RelativePath);
+internal sealed record PhysicalSourceFile(SourceLayer Layer, string Path, string RelativePath);
 internal sealed record ActivePlugin(string Name, int LoadOrderIndex, PhysicalSourceFile Provider);
 internal sealed record ArchiveIniSettings(
     IReadOnlyList<string> ResourceArchiveList,

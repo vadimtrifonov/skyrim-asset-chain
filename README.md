@@ -66,13 +66,13 @@ Scripts\qf_mq101_0003372b.PEX
 /scripts/QF_MQ101_0003372B.pex
 ```
 
-Run this command outside MO2. The command reads each physical source layer itself.
+Run this command outside MO2. It reads the game `Data` folder, each enabled mod, and `Overwrite` directly.
 
-The command rejects a process that contains MO2 USVFS. USVFS merges mod files into physical paths and makes provenance incorrect.
+The command stops if MO2 USVFS is active. USVFS combines these locations into one virtual `Data` folder and hides the origin of each file.
 
 ## Output
 
-The command writes compact JSONL. Each row describes one eligible provider entry:
+The command writes compact JSONL. Each row identifies one loose file or BSA member that contains the requested asset:
 
 ```jsonl
 {"assetPath":"scripts/qf_mq101_0003372b.pex","providerIndex":0,"sourceKind":"archive","sourceOrigin":"Game Data","sourcePath":"C:/Game/Data/Skyrim - Misc.bsa","sourceAssetPath":"scripts/qf_mq101_0003372b.pex","archive":"Skyrim - Misc.bsa","archiveLoadMechanism":"ini-list","archiveLoadSource":"sResourceArchiveList","archiveLoadIndex":0,"associatedPlugin":null,"pluginLoadOrderIndex":null,"modlistIndex":null,"winner":false}
@@ -88,8 +88,9 @@ The command writes compact JSONL. Each row describes one eligible provider entry
 
 Archive rows come first in archive-load order. Loose rows follow in MO2 priority order.
 
-The command reports matching members from shadowed physical copies of an active BSA name. Only the runtime-selected entry has `winner:true`.
-A successful chain can contain only `winner:false` rows. This result means that matching entries exist, but container shadowing blocks all of them.
+When the profile contains several copies of a registered BSA, the command reports matching assets from every copy.
+Only the copy that the game uses can have `winner:true`.
+A successful query can report matches without a winner. This occurs when only overridden BSA files contain the asset.
 
 Diagnostics use standard error. An error returns a nonzero exit code and produces no JSONL output.
 
@@ -97,15 +98,15 @@ Diagnostics use standard error. An error returns a nonzero exit code and produce
 
 The command applies these rules:
 
-1. MO2 skip rules filter files from enabled mods and `Overwrite`, but not from physical game `Data`.
-2. MO2 priority selects the physical copy of each logical BSA name.
-3. The game archive order selects among surviving BSA members.
+1. MO2 skip rules exclude matching files and directories from enabled mods and `Overwrite`. They do not apply to the game's `Data` folder.
+2. When several BSA files have the same name, MO2 priority selects one file.
+3. When several registered BSAs contain the asset, the game archive order selects the winning BSA.
 4. Loose files override BSA members.
-5. MO2 priority selects among loose files.
+5. When several loose files contain the asset, MO2 priority selects the winner.
 
 The command reads `skip_file_suffixes` and `skip_directories` from `[Settings]` in `<MO2 root>\ModOrganizer.ini`.
 If a setting is absent, the command uses the MO2 default: `.mohidden` for suffixes and `.git` for directories.
-An explicitly empty list supplies no entries for that setting.
+If a setting is present but empty, the command skips nothing for that setting instead of using the MO2 default.
 A skipped file does not hide an unsuffixed sibling.
 
 For Skyrim SE, the engine derives two associated BSA names from each active plugin. For `Example.esp`, these names are:
@@ -118,8 +119,17 @@ Example - Textures.bsa
 If both archives exist, the engine registers `Example.bsa` first and `Example - Textures.bsa` second.
 Other BSA names require another registration mechanism, such as an archive-list INI setting.
 
-The command does not model archive-list settings from plugin-sidecar INIs, such as `sResourceArchiveList`.
-It rejects a profile when an active plugin's matching INI contains a nonempty archive-list setting.
-
 Skyrim VR applies `sVrResourceArchiveList` after plugin archives.
 If the VR list loads no archive, the engine registers `Skyrim_VR - Main.bsa` by default.
+
+## Limits
+
+The command does not model the runtime precedence of these known cases. It rejects them instead of inferring a winner:
+
+- At one path in `Data`, `Overwrite` or a higher-priority mod contains a directory, but a lower-priority mod or the game contains a file.
+- An active plugin's matching sidecar INI contains a nonempty archive-list setting, such as `sResourceArchiveList`.
+
+The command does not report archives mounted by game menus or archive-loader extensions.
+This includes transient archives such as `MarketplaceTextures.bsa`.
+
+The command does not model custom mappings from MO2 plugins that use `IPluginFileMapper`.

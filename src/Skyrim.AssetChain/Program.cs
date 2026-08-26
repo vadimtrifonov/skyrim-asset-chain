@@ -92,7 +92,7 @@ public static class Program
         if (injected)
         {
             throw new InvalidOperationException(
-                "skyrim-asset-chain must run outside MO2. USVFS would merge virtual files into the physical source layers.");
+                "skyrim-asset-chain must run outside MO2. USVFS combines files into a virtual Data folder and hides their original locations.");
         }
     }
 }

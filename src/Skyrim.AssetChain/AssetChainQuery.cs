@@ -59,22 +59,17 @@ internal static class AssetChainQuery
         }
 
         ProviderCandidate? looseWinner = null;
-        foreach (var layer in profile.LayersWeakToStrong)
+        foreach (var file in profile.ResolveDataFiles(assetPath))
         {
-            var file = layer.FindLooseFile(assetPath);
-            if (file is null)
-            {
-                continue;
-            }
-
-            var candidate = ProviderCandidate.CreateLoose(layer, file);
+            var candidate = ProviderCandidate.CreateLoose(file);
             candidates.Add(candidate);
             looseWinner = candidate;
         }
 
         if (candidates.Count == 0)
         {
-            throw new InvalidOperationException($"Asset path has no eligible provider entry: {assetPath}");
+            throw new InvalidOperationException(
+                $"No loose file or registered BSA contains this asset in the selected profile: {assetPath}");
         }
 
         var winner = looseWinner ?? archiveWinner;
@@ -256,8 +251,8 @@ internal static class AssetChainQuery
             string storedPath) =>
             new("archive", copy.Layer, copy.Path, storedPath, archive);
 
-        internal static ProviderCandidate CreateLoose(SourceLayer layer, LooseSourceFile file) =>
-            new("loose", layer, file.Path, file.RelativePath, archive: null);
+        internal static ProviderCandidate CreateLoose(PhysicalSourceFile file) =>
+            new("loose", file.Layer, file.Path, file.RelativePath, archive: null);
     }
 }
 

@@ -162,20 +162,10 @@ internal static class ArchiveOrder
 
     private static IReadOnlyList<PhysicalArchiveCopy> FindPhysicalCopies(
         Mo2Profile profile,
-        string logicalName)
-    {
-        var copies = new List<PhysicalArchiveCopy>();
-        foreach (var layer in profile.LayersWeakToStrong)
-        {
-            var path = layer.FindRootFile(logicalName);
-            if (path is not null)
-            {
-                copies.Add(new PhysicalArchiveCopy(layer, path));
-            }
-        }
-
-        return copies;
-    }
+        string logicalName) =>
+        profile.ResolveDataFiles(logicalName)
+            .Select(file => new PhysicalArchiveCopy(file.Layer, file.Path))
+            .ToArray();
 
     private static void ValidateLoadOrder(
         Mo2Profile profile,
