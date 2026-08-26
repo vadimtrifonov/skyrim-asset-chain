@@ -256,12 +256,6 @@ internal static class AssetChainQuery
     }
 }
 
-internal enum GameKind
-{
-    SkyrimSE,
-    SkyrimVR
-}
-
 internal sealed record AssetChainResult(
     IReadOnlyList<AssetProviderRow> Rows,
     IReadOnlyList<string> Diagnostics);
