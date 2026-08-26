@@ -108,6 +108,30 @@ public sealed class Mo2ProfileTests(AssetChainFixture fixture) : IClassFixture<A
     }
 
     [Fact]
+    public void RejectsNonemptyArchiveListInActivePluginSidecar()
+    {
+        var root = CopyFixture();
+        var sidecarPath = Path.Combine(root, "managed-mods", "High", "Omega.ini");
+        const string setting = "sResourceArchiveList2";
+
+        File.WriteAllText(
+            sidecarPath,
+            $"[Archive]{Environment.NewLine}{setting}={Environment.NewLine}");
+        Assert.NotEmpty(ParseRows(_driver.Run("scripts/shared.pex", root: root)));
+
+        File.WriteAllText(
+            sidecarPath,
+            $"[Archive]{Environment.NewLine}{setting}=Sidecar.bsa{Environment.NewLine}");
+        var result = _driver.Run("scripts/shared.pex", root: root);
+
+        Assert.NotEqual(0, result.ExitCode);
+        Assert.Equal(string.Empty, result.Stdout);
+        Assert.Contains(setting, result.Stderr, StringComparison.Ordinal);
+        Assert.Contains("Omega.esp", result.Stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Omega.ini", result.Stderr, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CorruptShadowedArchiveFailsWithoutOutput()
     {
         var root = CopyFixture();

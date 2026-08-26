@@ -4,7 +4,7 @@ Skyrim Asset Chain reports the asset providers for one Mod Organizer 2 profile.
 
 It answers this question for each Data-relative path:
 
-> Which eligible sources contain this asset, and which source wins at runtime?
+> Which eligible sources contain this asset, and which source wins?
 
 The command reports loose files and members of active BSA files. It does not inspect or compare asset content.
 
@@ -117,6 +117,9 @@ Example - Textures.bsa
 
 If both archives exist, the engine registers `Example.bsa` first and `Example - Textures.bsa` second.
 Other BSA names require another registration mechanism, such as an archive-list INI setting.
+
+The command does not model archive-list settings from plugin-sidecar INIs, such as `sResourceArchiveList`.
+It rejects a profile when an active plugin's matching INI contains a nonempty archive-list setting.
 
 Skyrim VR applies `sVrResourceArchiveList` after plugin archives.
 If the VR list loads no archive, the engine registers `Skyrim_VR - Main.bsa` by default.

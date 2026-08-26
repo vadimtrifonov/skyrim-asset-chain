@@ -34,6 +34,12 @@ internal sealed class Mo2Profile
 
     private static readonly string[] DefaultSkipFileSuffixes = [".mohidden"];
     private static readonly string[] DefaultSkipDirectories = [".git"];
+    private static readonly string[] ArchiveListSettingNames =
+    [
+        "sResourceArchiveList",
+        "sResourceArchiveList2",
+        "sVrResourceArchiveList"
+    ];
 
     private Mo2Profile(
         GameKind game,
@@ -139,6 +145,7 @@ internal sealed class Mo2Profile
         var skipRules = ReadSkipRules(organizerIni, organizerIniPath);
         var layers = BuildLayers(dataFolder, enabledMods, overwriteFolder, skipRules);
         var activePlugins = BuildActivePlugins(game, gameRoot, pluginsPath, layers);
+        RejectUnsupportedArchiveSettingsInPluginSidecars(activePlugins, layers);
         var loadOrderValidation = File.Exists(loadOrderPath)
             ? ReadLoadOrder(loadOrderPath)
             : Array.Empty<string>();
@@ -161,20 +168,8 @@ internal sealed class Mo2Profile
             archiveSettings);
     }
 
-    internal PhysicalSourceFile? ResolveRootFileStrongest(string fileName)
-    {
-        for (var index = LayersWeakToStrong.Count - 1; index >= 0; index--)
-        {
-            var layer = LayersWeakToStrong[index];
-            var file = layer.FindRootFile(fileName);
-            if (file is not null)
-            {
-                return new PhysicalSourceFile(layer, file);
-            }
-        }
-
-        return null;
-    }
+    internal PhysicalSourceFile? ResolveRootFileStrongest(string fileName) =>
+        FindRootFileStrongest(LayersWeakToStrong, fileName);
 
     private static IReadOnlyList<SourceLayer> BuildLayers(
         string dataFolder,
@@ -305,6 +300,36 @@ internal sealed class Mo2Profile
         }
 
         return active;
+    }
+
+    private static void RejectUnsupportedArchiveSettingsInPluginSidecars(
+        IReadOnlyList<ActivePlugin> activePlugins,
+        IReadOnlyList<SourceLayer> layers)
+    {
+        foreach (var plugin in activePlugins)
+        {
+            var sidecarName = Path.ChangeExtension(plugin.Name, ".ini");
+            var sidecar = FindRootFileStrongest(layers, sidecarName);
+            if (sidecar is null)
+            {
+                continue;
+            }
+
+            var ini = IniFile.Read(sidecar.Path);
+            foreach (var setting in ArchiveListSettingNames)
+            {
+                if (!ini.TryGet("Archive", setting, out var value) ||
+                    string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                throw new InvalidOperationException(
+                    $"Unsupported plugin-sidecar archive setting [Archive] {setting}: " +
+                    $"active plugin '{plugin.Name}' uses '{sidecarName}' from " +
+                    $"'{sidecar.Layer.Origin}': {sidecar.Path}");
+            }
+        }
     }
 
     private static IReadOnlyList<string> ReadPluginListings(string path)
@@ -469,10 +494,7 @@ internal sealed class Mo2Profile
         }
 
         var ini = IniFile.Read(path);
-        foreach (var key in new[]
-                 {
-                     "sResourceArchiveList", "sResourceArchiveList2", "sVrResourceArchiveList"
-                 })
+        foreach (var key in ArchiveListSettingNames)
         {
             if (ini.TryGet("Archive", key, out var value))
             {
